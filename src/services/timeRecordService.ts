@@ -1,9 +1,99 @@
-import { format } from "date-fns";
-import { doc, setDoc, collection, getDocs, deleteDoc } from "firebase/firestore";
+import { format, parse } from "date-fns";
+import { doc, setDoc, collection, getDocs, deleteDoc, Timestamp } from "firebase/firestore";
 import { db } from "./firebase";
 import { TimeRecord, AttendanceAction, ScanResult } from "../types/index";
 import { CACHE } from "./cacheUtils";
 
+// Helper function to convert time string to Firestore Timestamp
+function convertToTimestamp(dateStr: any, timeValue: any): Timestamp | null {
+  // Return null for empty/falsy values
+  if (!timeValue) return null;
+  
+  try {
+    let timeStr: string;
+    
+    // Handle different time value formats
+    if (typeof timeValue === 'string') {
+      timeStr = timeValue;
+    } else if (timeValue instanceof Timestamp) {
+      // If it's already a Timestamp, return it directly
+      return timeValue;
+    } else if (timeValue instanceof Date) {
+      // Convert Date to Timestamp
+      return Timestamp.fromDate(timeValue);
+    } else {
+      console.warn("Unsupported time format:", timeValue);
+      return null;
+    }
+
+    // Parse time string (format: "hh:mm a")
+    const [time, period] = timeStr.split(' ');
+    const [hours, minutes] = time.split(':').map(Number);
+    
+    // Convert to 24-hour format
+    let hours24 = hours;
+    if (period === 'PM' && hours < 12) hours24 += 12;
+    if (period === 'AM' && hours === 12) hours24 = 0;
+    
+    // Handle different date formats
+    let date: Date;
+    if (dateStr instanceof Date) {
+      date = new Date(dateStr); // Clone the date
+    } else if (dateStr?.toDate) {
+      date = dateStr.toDate(); // Firestore Timestamp
+    } else if (typeof dateStr === 'string') {
+      date = parse(dateStr, 'yyyy-MM-dd', new Date());
+    } else {
+      date = new Date(); // Fallback
+    }
+    
+    date.setHours(hours24, minutes, 0, 0);
+    return Timestamp.fromDate(date);
+  } catch (error) {
+    console.error("Error converting to timestamp:", error);
+    return null;
+  }
+}
+// Helper function to prepare record for Firestore with proper types
+// Updated prepareFirestoreRecord function
+function prepareFirestoreRecord(record: TimeRecord): any {
+  // Helper to safely parse dates
+  const parseDate = (dateValue: any): Date => {
+    if (dateValue instanceof Date) return dateValue;
+    if (dateValue?.toDate) return dateValue.toDate();
+    if (typeof dateValue === 'string') {
+      try {
+        return parse(dateValue, 'yyyy-MM-dd', new Date());
+      } catch {
+        console.warn("Failed to parse date string");
+      }
+    }
+    return new Date();
+  };
+
+  // Prepare the Firestore document
+  const firestoreRecord: any = {
+    userId: record.userId,
+    userName: record.userName,
+    date: Timestamp.fromDate(parseDate(record.date))
+  };
+
+  // Only add time fields if they exist (using null instead of undefined)
+  if (record.timeInAM !== undefined) {
+    firestoreRecord.timeInAM = convertToTimestamp(record.date, record.timeInAM);
+  }
+  if (record.timeOutAM !== undefined) {
+    firestoreRecord.timeOutAM = convertToTimestamp(record.date, record.timeOutAM);
+  }
+  if (record.timeInPM !== undefined) {
+    firestoreRecord.timeInPM = convertToTimestamp(record.date, record.timeInPM);
+  }
+  if (record.timeOutPM !== undefined) {
+    firestoreRecord.timeOutPM = convertToTimestamp(record.date, record.timeOutPM);
+  }
+
+  return firestoreRecord;
+}
 export async function getTodayRecord(userId: string): Promise<TimeRecord | null> {
   const today = format(new Date(), "yyyy-MM-dd");
   const cacheKey = `${userId}_${today}`;
@@ -34,18 +124,20 @@ export async function determineAction(userId: string, userName: string): Promise
         userName,
         date: today,
         timeInAM: isAM ? formattedTime : undefined,
-        timeInPM: isAM ? undefined : formattedTime
+        timeOutAM: undefined,
+        timeInPM: isAM ? undefined : formattedTime,
+        timeOutPM: undefined
       };
       
       // Update Firebase immediately to ensure persistence
       try {
-        await setDoc(doc(db, "attendance", cacheKey), record);
+        await setDoc(doc(db, "attendance", cacheKey), prepareFirestoreRecord(record));
         console.log("New attendance record created in Firebase");
       } catch (err) {
         console.error("Firebase update failed:", err);
       }
       
-      // Update cache immediately
+      // Update cache immediately (keep as strings in cache)
       CACHE.records[cacheKey] = record;
       
       return {
@@ -102,12 +194,12 @@ export async function determineAction(userId: string, userName: string): Promise
     }
     
     if (success) {
-      // Update cache immediately
+      // Update cache immediately (keep as strings in cache)
       CACHE.records[cacheKey] = record;
       
-      // Update Firebase immediately to ensure persistence
+      // Update Firebase immediately with proper types
       try {
-        await setDoc(doc(db, "attendance", cacheKey), record);
+        await setDoc(doc(db, "attendance", cacheKey), prepareFirestoreRecord(record));
         console.log("Attendance record updated in Firebase");
       } catch (err) {
         console.error("Firebase update failed:", err);

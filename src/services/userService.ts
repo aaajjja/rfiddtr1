@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc, getDocs, collection, query, where } from "firebase/firestore";
+import { doc, getDoc, setDoc, getDocs, collection, query, where, deleteDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import { User } from "../types/index";
 import { CACHE } from "./cacheUtils";
@@ -18,6 +18,8 @@ export function loadSimulatedUsers() {
     }
   });
 }
+
+
 
 // Function to clear all simulated users from the cache
 export function clearSimulatedUsers(): boolean {
@@ -146,3 +148,4 @@ export async function registerNewUser(userData: {
     };
   }
 }
+
