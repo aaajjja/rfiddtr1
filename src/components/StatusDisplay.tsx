@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { ScanResult } from '../types';
@@ -26,51 +25,61 @@ const StatusDisplay: React.FC<StatusDisplayProps> = ({ scanResult, isProcessing 
   const getStatusDetails = () => {
     if (isProcessing) {
       return {
-        icon: <Clock className="h-8 w-8 animate-spin" />,
-        color: 'bg-warning/10 text-warning',
-        message: 'Processing scan...'
+        icon: <Clock className="h-12 w-12 animate-spin" />,
+        color: 'bg-amber-50 border-amber-200 text-amber-700',
+        bgColor: 'bg-amber-100',
+        message: 'Processing your scan...',
+        title: 'Please Wait'
       };
     }
     
     if (!scanResult) {
       return {
-        icon: <AlertCircle className="h-8 w-8" />,
-        color: 'bg-muted text-muted-foreground',
-        message: 'Scan your RFID Card'
+        icon: <AlertCircle className="h-12 w-12" />,
+        color: 'bg-blue-50 border-blue-200 text-blue-700',
+        bgColor: 'bg-blue-100',
+        message: 'Ready to scan your RFID card',
+        title: 'Scan Ready'
       };
     }
     
     if (scanResult.success) {
       return {
-        icon: <CheckCircle className="h-8 w-8" />,
-        color: 'bg-success/10 text-success',
-        message: scanResult.message
+        icon: <CheckCircle className="h-12 w-12" />,
+        color: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+        bgColor: 'bg-emerald-100',
+        message: scanResult.message,
+        title: scanResult.action || 'Success'
       };
     }
     
     return {
-      icon: <XCircle className="h-8 w-8" />,
-      color: 'bg-destructive/10 text-destructive',
-      message: scanResult.message
+      icon: <XCircle className="h-12 w-12" />,
+      color: 'bg-red-50 border-red-200 text-red-700',
+      bgColor: 'bg-red-100',
+      message: scanResult.message,
+      title: 'Scan Failed'
     };
   };
 
-  const { icon, color, message } = getStatusDetails();
+  const { icon, color, bgColor, message, title } = getStatusDetails();
   
   return (
     <Card className={cn(
-      "border transition-all", 
+      "border-2 transition-all duration-300 min-w-80 shadow-lg", 
       color,
-      animate && "scan-animation"
+      animate && "scale-105 shadow-xl"
     )}>
-      <CardContent className="pt-6 pb-6 px-6">
-        <div className="flex items-center space-x-4">
-          {icon}
-          <div>
-            <h3 className="font-medium text-lg">
-              {scanResult?.action || "Ready"}
+      <CardContent className="pt-8 pb-8 px-8">
+        <div className="flex flex-col items-center text-center space-y-4">
+          <div className={cn("p-4 rounded-full", bgColor)}>
+            {icon}
+          </div>
+          <div className="space-y-2">
+            <h3 className="font-bold text-xl">
+              {title}
             </h3>
-            <p className="text-sm">
+            <p className="text-base leading-relaxed max-w-sm">
               {message}
             </p>
           </div>

@@ -6,11 +6,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { ArrowLeft, Loader2, RefreshCw, Trash2, UserPlus } from "lucide-react";
+import { ArrowLeft, Loader2, RefreshCw, Trash2, UserPlus, Search } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast, useToast } from "../components/ui/use-toast";
-import { registerNewUser, clearSimulatedUsers } from "../services/userService";
-import { getAttendanceRecords, clearAttendanceRecords, reprocessAttendanceData } from "../services/attendanceManagementService";
+import { registerNewUser } from "../services/userService";
+import { getAttendanceRecords, clearAttendanceRecords} from "../services/attendanceManagementService";
 import { 
   Select,
   SelectContent,
@@ -31,6 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
+import { ScrollArea } from "../components/ui/scroll-area";
 
 // Import types directly from the types folder
 import type { User, TimeRecord } from "../types/index";
@@ -48,6 +49,9 @@ const AdminDashboard: React.FC = () => {
   });
   const [isResetting, setIsResetting] = useState(false);
   const [registeredUsers, setRegisteredUsers] = useState<User[]>([]);
+
+  // Add search state
+  const [searchTerm, setSearchTerm] = useState('');
 
   const DEMO_CARD_UIDS = ["12345678", "87654321", "11223344"];
 
@@ -228,28 +232,6 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
-  const handleReprocessData = async () => {
-    setIsProcessing(true);
-    try {
-      const result = await reprocessAttendanceData();
-      toast({
-        title: "Data Reprocessed",
-        description: `Successfully reprocessed ${result.processedCount} attendance records.`,
-      });
-      // Refresh records after reprocessing
-      setRefreshKey(prev => prev + 1);
-    } catch (error) {
-      console.error("Error reprocessing attendance data:", error);
-      toast({
-        title: "Processing Error",
-        description: "Failed to reprocess attendance data",
-        variant: "destructive",
-      });
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
   const handleDepartmentChange = (value: string) => {
     setNewUser({...newUser, department: value});
   };
@@ -335,37 +317,24 @@ useEffect(() => {
     }
   };
   
-  const handleClearSimulatedUsers = () => {
-    if (window.confirm("This will remove all built-in demo users. Are you sure?")) {
-      clearSimulatedUsers();
-      
-      // Update the user list to only show non-simulated users
-      // First, filter out any users that might be left in the cache as these would be real users (not simulated)
-      const realUsersInCache = Object.values(CACHE.users);
-      
-      // Since we only want to show newly registered users, not any pre-existing ones,
-      // we'll clear the registeredUsers list completely
-      setRegisteredUsers([]);
-      
-      toast({
-        title: "Demo Users Cleared",
-        description: "All simulated users have been removed.",
-      });
-    }
-  };
-
   // Instead, only load registered users if explicitly requested
   const loadRegisteredUsers = () => {
     const users = Object.values(CACHE.users);
     setRegisteredUsers(users);
   };
 
+  // Filter records based on search term
+  const filteredRecords = attendanceRecords.filter(record => 
+    record.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    record.date.includes(searchTerm)
+  );
+
   return (
-    <div className="container mx-auto p-4 max-w-6xl">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-primary">Admin Dashboard</h1>
+    <div className="container mx-auto px-2 sm:px-4 max-w-full sm:max-w-6xl">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+        <h1 className="text-xl sm:text-2xl font-bold text-primary">Admin Dashboard</h1>
         <Link to="/">
-          <Button variant="outline">
+          <Button variant="outline" size="sm" className="w-full sm:w-auto">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Scanner
           </Button>
@@ -373,158 +342,163 @@ useEffect(() => {
       </div>
       
       <Tabs defaultValue="attendance" className="space-y-4">
-        <TabsList className="grid grid-cols-2 w-full">
+        <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="users">User Management</TabsTrigger>
           <TabsTrigger value="attendance">Attendance Records</TabsTrigger>
         </TabsList>
         
         <TabsContent value="users">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Register New RFID Card</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleAddUser} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Full Name</Label>
-                    <Input 
-                      id="name"
-                      value={newUser.name}
-                      onChange={(e) => setNewUser({...newUser, name: e.target.value})}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="cardUID">Card UID</Label>
-                    <Input 
-                      id="cardUID" 
-                      value={newUser.cardUID}
-                      onChange={(e) => setNewUser({...newUser, cardUID: e.target.value})}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="department">Department</Label>
-                    <Select 
-                      value={newUser.department} 
-                      onValueChange={handleDepartmentChange}
-                    >
-                      <SelectTrigger id="department">
-                        <SelectValue placeholder="Select department" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="CCIS">CCIS</SelectItem>
-                        <SelectItem value="COE">COE</SelectItem>
-                        <SelectItem value="CAS">CAS</SelectItem>
-                        <SelectItem value="CAFSD">CAFSD</SelectItem>
-                        <SelectItem value="CHS">CHS</SelectItem>
-                        <SelectItem value="CBEA">CBEA</SelectItem>
-                        <SelectItem value="COM">COM</SelectItem>
-                        <SelectItem value="CVM">CVM</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <Button type="submit" disabled={isLoading} className="mt-4">
-                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
-                  Register New User
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-          <Card className="mt-4">
-            <CardHeader>
-              <CardTitle>Registered Users</CardTitle>
-              <CardDescription>Users currently registered in the system</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {registeredUsers.length === 0 ? (
-                <p className="text-muted-foreground">No users registered yet</p>
-              ) : (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-3 font-semibold">
-                    <div>Name</div>
-                    <div>Card UID</div>
-                    <div>Department</div>
-                  </div>
-                  <Separator />
-                  {registeredUsers.map(user => (
-                    <div key={user.cardUID} className="grid grid-cols-3">
-                      <div>{user.name}</div>
-                      <div>{user.cardUID}</div>
-                      <div>{user.department || "-"}</div>
+          <div className="grid gap-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base sm:text-lg">Register New RFID Card</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleAddUser} className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="name">Full Name</Label>
+                      <Input 
+                        id="name"
+                        value={newUser.name}
+                        onChange={(e) => setNewUser({...newUser, name: e.target.value})}
+                        required
+                        className="w-full"
+                      />
                     </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-          <Card className="mt-4">
-            <CardHeader>
-              <CardTitle>System Management</CardTitle>
-              <CardDescription>Advanced options for system management</CardDescription>
-            </CardHeader>
-            <CardContent className="flex gap-4">
-              <Button 
-                variant="outline" 
-                onClick={handleClearSimulatedUsers}
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Clear Demo Users
-              </Button>
-              <Button 
-                variant="destructive" 
-                onClick={handleResetSystem}
-                disabled={isResetting}
-              >
-                {isResetting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Resetting...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Reset System
-                  </>
-                )}
-              </Button>
-            </CardContent>
-          </Card>
+                    <div className="space-y-2">
+                      <Label htmlFor="cardUID">Card UID</Label>
+                      <Input 
+                        id="cardUID" 
+                        value={newUser.cardUID}
+                        onChange={(e) => setNewUser({...newUser, cardUID: e.target.value})}
+                        required
+                        className="w-full"
+                      />
+                    </div>
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label htmlFor="department">Department</Label>
+                      <Select 
+                        value={newUser.department} 
+                        onValueChange={handleDepartmentChange}
+                      >
+                        <SelectTrigger id="department" className="w-full">
+                          <SelectValue placeholder="Select department" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="CCIS">CCIS</SelectItem>
+                          <SelectItem value="COE">COE</SelectItem>
+                          <SelectItem value="CAS">CAS</SelectItem>
+                          <SelectItem value="CAFSD">CAFSD</SelectItem>
+                          <SelectItem value="CHS">CHS</SelectItem>
+                          <SelectItem value="CBEA">CBEA</SelectItem>
+                          <SelectItem value="COM">COM</SelectItem>
+                          <SelectItem value="CVM">CVM</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <Button type="submit" disabled={isLoading} className="w-full sm:w-auto">
+                    {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
+                    Register New User
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base sm:text-lg">Registered Users</CardTitle>
+                <CardDescription>Users currently registered in the system</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="h-[300px] w-full rounded-md border p-4">
+                  {registeredUsers.length === 0 ? (
+                    <p className="text-muted-foreground">No users registered yet</p>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-3 font-semibold text-sm">
+                        <div>Name</div>
+                        <div>Card UID</div>
+                        <div>Department</div>
+                      </div>
+                      <Separator />
+                      {registeredUsers.map(user => (
+                        <div key={user.cardUID} className="grid grid-cols-3 text-sm">
+                          <div className="truncate">{user.name}</div>
+                          <div className="truncate">{user.cardUID}</div>
+                          <div>{user.department || "-"}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </ScrollArea>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base sm:text-lg">System Management</CardTitle>
+                <CardDescription>Advanced options for system management</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button 
+                  variant="destructive" 
+                  onClick={handleResetSystem}
+                  disabled={isResetting}
+                  className="w-full sm:w-auto"
+                >
+                  {isResetting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Resetting...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Reset System
+                    </>
+                  )}
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
         
         <TabsContent value="attendance">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-lg">Attendance Records Management</CardTitle>
-              <div className="flex gap-2">
-                <Button 
-                  variant="outline" 
-                  onClick={() => {
-                    setRefreshKey(prev => prev + 1);
-                  }} 
-                  disabled={isProcessing}
-                >
-                  {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                  Refresh Data
-                </Button>
-                <Button 
-                  variant="outline" 
-                  onClick={handleReprocessData} 
-                  disabled={isProcessing}
-                >
-                  {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                  Reprocess Data
-                </Button>
-                <Button 
-                  variant="destructive" 
-                  onClick={handleClearRecords} 
-                  disabled={isProcessing}
-                >
-                  {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                  Clear Records
-                </Button>
+            <CardHeader className="space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <CardTitle className="text-base sm:text-lg">Attendance Records Management</CardTitle>
+                <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setRefreshKey(prev => prev + 1)} 
+                    disabled={isProcessing}
+                    className="w-full sm:w-auto"
+                  >
+                    {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                    Refresh
+                  </Button>
+                  <Button 
+                    variant="destructive" 
+                    onClick={handleClearRecords} 
+                    disabled={isProcessing}
+                    className="w-full sm:w-auto"
+                  >
+                    {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                    Clear Records
+                  </Button>
+                </div>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by name or date..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-8"
+                />
               </div>
             </CardHeader>
             <CardContent>
@@ -534,34 +508,36 @@ useEffect(() => {
                 </div>
               )}
               
-              {!isProcessing && attendanceRecords.length === 0 ? (
+              {!isProcessing && filteredRecords.length === 0 ? (
                 <p className="text-center text-gray-500 my-8">No attendance records found.</p>
               ) : !isProcessing && (
                 <div className="rounded-md border overflow-hidden">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>User</TableHead>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Time In AM</TableHead>
-                        <TableHead>Time Out AM</TableHead>
-                        <TableHead>Time In PM</TableHead>
-                        <TableHead>Time Out PM</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                <TableBody>
-  {attendanceRecords.map((record) => (
-    <TableRow key={`${record.userId}-${record.date}`}>
-      <TableCell>{record.userName}</TableCell>
-      <TableCell>{record.date}</TableCell>
-      <TableCell>{record.timeInAM || '-'}</TableCell>
-      <TableCell>{record.timeOutAM || '-'}</TableCell>
-      <TableCell>{record.timeInPM || '-'}</TableCell>
-      <TableCell>{record.timeOutPM || '-'}</TableCell>
-    </TableRow>
-  ))}
-</TableBody>
-                  </Table>
+                  <ScrollArea className="h-[400px]">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="min-w-[150px]">User</TableHead>
+                          <TableHead className="min-w-[100px]">Date</TableHead>
+                          <TableHead className="min-w-[100px]">Time In AM</TableHead>
+                          <TableHead className="min-w-[100px]">Time Out AM</TableHead>
+                          <TableHead className="min-w-[100px]">Time In PM</TableHead>
+                          <TableHead className="min-w-[100px]">Time Out PM</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredRecords.map((record) => (
+                          <TableRow key={`${record.userId}-${record.date}`}>
+                            <TableCell className="font-medium">{record.userName}</TableCell>
+                            <TableCell>{record.date}</TableCell>
+                            <TableCell>{record.timeInAM || '-'}</TableCell>
+                            <TableCell>{record.timeOutAM || '-'}</TableCell>
+                            <TableCell>{record.timeInPM || '-'}</TableCell>
+                            <TableCell>{record.timeOutPM || '-'}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </ScrollArea>
                 </div>
               )}
             </CardContent>

@@ -1,8 +1,7 @@
-
-import { User, ScanResult } from "../types";
+import type { User, ScanResult } from "../types";
 import { getUserByCardUID, registerNewUser } from "./userService";
 import { determineAction } from "./timeRecordService";
-import { getAttendanceRecords, clearAttendanceRecords, reprocessAttendanceData } from "./attendanceManagementService";
+import { getAttendanceRecords, clearAttendanceRecords} from "./attendanceManagementService";
 
 export async function recordAttendance(cardUID: string): Promise<ScanResult> {
   try {
@@ -24,7 +23,7 @@ export async function recordAttendance(cardUID: string): Promise<ScanResult> {
     console.error("Error recording attendance:", error);
     return {
       success: false,
-      message: "Failed to process scan. Please try again."
+      message: "Failed to process scan. Please try again or contact support."
     };
   }
 }
@@ -36,5 +35,4 @@ export {
   determineAction,
   getAttendanceRecords,
   clearAttendanceRecords,
-  reprocessAttendanceData
 };
