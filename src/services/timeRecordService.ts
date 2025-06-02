@@ -1,224 +1,455 @@
-import { format, parse } from "date-fns";
-import { doc, setDoc, collection, getDocs, deleteDoc, Timestamp } from "firebase/firestore";
-import { db } from "./firebase";
-import { TimeRecord, AttendanceAction, ScanResult } from "../types/index";
-import { CACHE } from "./cacheUtils";
+import { format, parse, isValid } from "date-fns"
+import { doc, setDoc, collection, getDocs, deleteDoc, Timestamp } from "firebase/firestore"
+import { db } from "./firebase"
+import type { TimeRecord, AttendanceAction, ScanResult } from "../types/index"
+import { CACHE } from "./cacheUtils"
+
+// Working hours configuration
+const WORKING_HOURS = {
+  AM_START: 8, // 8:00 AM
+  AM_END: 12, // 12:00 PM
+  PM_START: 13, // 1:00 PM
+  PM_END: 17, // 5:00 PM
+  GRACE_PERIOD: 30, // 30 minutes grace period
+} as const
 
 // Helper function to convert time string to Firestore Timestamp
 function convertToTimestamp(dateStr: any, timeValue: any): Timestamp | null {
-  // Return null for empty/falsy values
-  if (!timeValue) return null;
-  
+  if (!timeValue) return null
+
   try {
-    let timeStr: string;
-    
     // Handle different time value formats
-    if (typeof timeValue === 'string') {
-      timeStr = timeValue;
-    } else if (timeValue instanceof Timestamp) {
-      // If it's already a Timestamp, return it directly
-      return timeValue;
-    } else if (timeValue instanceof Date) {
-      // Convert Date to Timestamp
-      return Timestamp.fromDate(timeValue);
-    } else {
-      console.warn("Unsupported time format:", timeValue);
-      return null;
+    if (timeValue instanceof Timestamp) {
+      return timeValue
     }
 
-    // Parse time string (format: "hh:mm a")
-    const [time, period] = timeStr.split(' ');
-    const [hours, minutes] = time.split(':').map(Number);
-    
-    // Convert to 24-hour format
-    let hours24 = hours;
-    if (period === 'PM' && hours < 12) hours24 += 12;
-    if (period === 'AM' && hours === 12) hours24 = 0;
-    
-    // Handle different date formats
-    let date: Date;
-    if (dateStr instanceof Date) {
-      date = new Date(dateStr); // Clone the date
-    } else if (dateStr?.toDate) {
-      date = dateStr.toDate(); // Firestore Timestamp
-    } else if (typeof dateStr === 'string') {
-      date = parse(dateStr, 'yyyy-MM-dd', new Date());
-    } else {
-      date = new Date(); // Fallback
+    if (timeValue instanceof Date) {
+      return Timestamp.fromDate(timeValue)
     }
-    
-    date.setHours(hours24, minutes, 0, 0);
-    return Timestamp.fromDate(date);
+
+    if (typeof timeValue !== "string") {
+      console.warn("Unsupported time format:", timeValue)
+      return null
+    }
+
+    // Parse time string (format: "hh:mm a" or "h:mm a")
+    const timeStr = timeValue.trim()
+    const timeRegex = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i
+    const match = timeStr.match(timeRegex)
+
+    if (!match) {
+      console.warn("Invalid time format:", timeStr)
+      return null
+    }
+
+    const [, hoursStr, minutesStr, period] = match
+    let hours = Number.parseInt(hoursStr, 10)
+    const minutes = Number.parseInt(minutesStr, 10)
+
+    // Validate time components
+    if (hours < 1 || hours > 12 || minutes < 0 || minutes > 59) {
+      console.warn("Invalid time values:", { hours, minutes })
+      return null
+    }
+
+    // Convert to 24-hour format
+    if (period.toUpperCase() === "PM" && hours !== 12) {
+      hours += 12
+    } else if (period.toUpperCase() === "AM" && hours === 12) {
+      hours = 0
+    }
+
+    // Parse date
+    let date: Date
+    if (dateStr instanceof Date) {
+      date = new Date(dateStr)
+    } else if (dateStr?.toDate) {
+      date = dateStr.toDate()
+    } else if (typeof dateStr === "string") {
+      date = parse(dateStr, "yyyy-MM-dd", new Date())
+      if (!isValid(date)) {
+        console.warn("Invalid date string:", dateStr)
+        return null
+      }
+    } else {
+      date = new Date()
+    }
+
+    // Set the time
+    date.setHours(hours, minutes, 0, 0)
+
+    if (!isValid(date)) {
+      console.warn("Invalid date after setting time:", date)
+      return null
+    }
+
+    return Timestamp.fromDate(date)
   } catch (error) {
-    console.error("Error converting to timestamp:", error);
-    return null;
+    console.error("Error converting to timestamp:", error)
+    return null
   }
 }
-// Helper function to prepare record for Firestore with proper types
-// Updated prepareFirestoreRecord function
-function prepareFirestoreRecord(record: TimeRecord): any {
-  // Helper to safely parse dates
-  const parseDate = (dateValue: any): Date => {
-    if (dateValue instanceof Date) return dateValue;
-    if (dateValue?.toDate) return dateValue.toDate();
-    if (typeof dateValue === 'string') {
-      try {
-        return parse(dateValue, 'yyyy-MM-dd', new Date());
-      } catch {
-        console.warn("Failed to parse date string");
-      }
-    }
-    return new Date();
-  };
 
-  // Prepare the Firestore document
+// Helper function to prepare record for Firestore
+function prepareFirestoreRecord(record: TimeRecord): any {
+  const parseDate = (dateValue: any): Date => {
+    if (dateValue instanceof Date) return dateValue
+    if (dateValue?.toDate) return dateValue.toDate()
+    if (typeof dateValue === "string") {
+      const parsed = parse(dateValue, "yyyy-MM-dd", new Date())
+      return isValid(parsed) ? parsed : new Date()
+    }
+    return new Date()
+  }
+
   const firestoreRecord: any = {
     userId: record.userId,
     userName: record.userName,
-    date: Timestamp.fromDate(parseDate(record.date))
-  };
-
-  // Only add time fields if they exist (using null instead of undefined)
-  if (record.timeInAM !== undefined) {
-    firestoreRecord.timeInAM = convertToTimestamp(record.date, record.timeInAM);
-  }
-  if (record.timeOutAM !== undefined) {
-    firestoreRecord.timeOutAM = convertToTimestamp(record.date, record.timeOutAM);
-  }
-  if (record.timeInPM !== undefined) {
-    firestoreRecord.timeInPM = convertToTimestamp(record.date, record.timeInPM);
-  }
-  if (record.timeOutPM !== undefined) {
-    firestoreRecord.timeOutPM = convertToTimestamp(record.date, record.timeOutPM);
+    date: Timestamp.fromDate(parseDate(record.date)),
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
   }
 
-  return firestoreRecord;
+  // Add time fields only if they exist
+  const timeFields = ["timeInAM", "timeOutAM", "timeInPM", "timeOutPM"] as const
+
+  timeFields.forEach((field) => {
+    if (record[field] !== undefined && record[field] !== null) {
+      const timestamp = convertToTimestamp(record.date, record[field])
+      if (timestamp) {
+        firestoreRecord[field] = timestamp
+      }
+    }
+  })
+
+  // Add flags for missed entries
+  if (record.missedAM) firestoreRecord.missedAM = true
+  if (record.missedPM) firestoreRecord.missedPM = true
+
+  return firestoreRecord
 }
+
+// Get current time period
+function getCurrentTimePeriod(currentHour: number): "AM" | "PM" | "LUNCH" | "AFTER_HOURS" | "BEFORE_HOURS" {
+  if (currentHour < WORKING_HOURS.AM_START) {
+    return "BEFORE_HOURS"
+  } else if (currentHour >= WORKING_HOURS.AM_START && currentHour < WORKING_HOURS.AM_END) {
+    return "AM"
+  } else if (currentHour >= WORKING_HOURS.AM_END && currentHour < WORKING_HOURS.PM_START) {
+    return "LUNCH"
+  } else if (currentHour >= WORKING_HOURS.PM_START && currentHour < WORKING_HOURS.PM_END) {
+    return "PM"
+  } else {
+    return "AFTER_HOURS"
+  }
+}
+
 export async function getTodayRecord(userId: string): Promise<TimeRecord | null> {
-  const today = format(new Date(), "yyyy-MM-dd");
-  const cacheKey = `${userId}_${today}`;
-  
-  // Direct cache lookup without async overhead for improved performance
-  return CACHE.records[cacheKey] || null;
+  const today = format(new Date(), "yyyy-MM-dd")
+  const cacheKey = `${userId}_${today}`
+
+  return CACHE.records[cacheKey] || null
 }
 
-export async function determineAction(userId: string, userName: string): Promise<ScanResult> {
-  const today = format(new Date(), "yyyy-MM-dd");
-  const now = new Date();
-  const formattedTime = format(now, "hh:mm a");
-  const cacheKey = `${userId}_${today}`;
-  
-  // Determine if it's morning or afternoon for proper labeling
-  const hour = now.getHours();
-  const isAM = hour < 12;
-  const timeLabel = isAM ? "AM" : "PM";
-  
+// Updated function with explicit action parameter
+export async function determineAction(
+  userId: string,
+  userName: string,
+  requestedAction?: AttendanceAction,
+): Promise<ScanResult> {
+  const today = format(new Date(), "yyyy-MM-dd")
+  const now = new Date()
+  const currentHour = now.getHours()
+  const formattedTime = format(now, "hh:mm a")
+  const cacheKey = `${userId}_${today}`
+
   try {
-    // Get today's record with minimal overhead
-    let record = CACHE.records[cacheKey] || null;
-    
+    let record = CACHE.records[cacheKey]
+
+    // Initialize record if it doesn't exist
     if (!record) {
-      // No record today, create new with Time In (AM/PM based on time of day)
       record = {
         userId,
         userName,
         date: today,
-        timeInAM: isAM ? formattedTime : undefined,
+        timeInAM: undefined,
         timeOutAM: undefined,
-        timeInPM: isAM ? undefined : formattedTime,
-        timeOutPM: undefined
-      };
-      
-      // Update Firebase immediately to ensure persistence
-      try {
-        await setDoc(doc(db, "attendance", cacheKey), prepareFirestoreRecord(record));
-        console.log("New attendance record created in Firebase");
-      } catch (err) {
-        console.error("Firebase update failed:", err);
-      }
-      
-      // Update cache immediately (keep as strings in cache)
-      CACHE.records[cacheKey] = record;
-      
-      return {
-        success: true,
-        action: isAM ? "Time In AM" : "Time In PM",
-        time: formattedTime,
-        message: `Welcome ${userName}! Time In ${timeLabel} recorded at ${formattedTime}`,
-        userName
-      };
-    }
-    
-    // Determine next action based on existing record and time of day
-    let action: AttendanceAction = "Complete";
-    let message = `${userName}, you have completed your DTR for today.`;
-    let success = false;
-    
-    if (isAM) {
-      // Morning logic
-      if (!record.timeOutAM) {
-        // Time Out AM
-        record.timeOutAM = formattedTime;
-        action = "Time Out AM";
-        message = `Goodbye ${userName}! Time Out AM recorded at ${formattedTime}`;
-        success = true;
-      } else if (record.timeOutAM && !record.timeInPM) {
-        // Special case: already timed out AM, but now it's still AM again
-        // Allow a new Time In AM to override
-        record.timeInAM = formattedTime;
-        action = "Time In AM (Updated)";
-        message = `Welcome back ${userName}! Updated Time In AM recorded at ${formattedTime}`;
-        success = true;
-      }
-    } else {
-      // Afternoon logic
-      if (!record.timeInPM && record.timeInAM) {
-        // Time In PM (only if they had timed in for AM)
-        record.timeInPM = formattedTime;
-        action = "Time In PM";
-        message = `Welcome back ${userName}! Time In PM recorded at ${formattedTime}`;
-        success = true;
-      } else if (!record.timeInPM) {
-        // First scan of the day but in afternoon
-        record.timeInPM = formattedTime;
-        action = "Time In PM";
-        message = `Welcome ${userName}! Time In PM recorded at ${formattedTime}`;
-        success = true;
-      } else if (record.timeInPM && !record.timeOutPM) {
-        // Time Out PM
-        record.timeOutPM = formattedTime;
-        action = "Time Out PM";
-        message = `Goodbye ${userName}! Time Out PM recorded at ${formattedTime}. See you tomorrow!`;
-        success = true;
+        timeInPM: undefined,
+        timeOutPM: undefined,
       }
     }
-    
-    if (success) {
-      // Update cache immediately (keep as strings in cache)
-      CACHE.records[cacheKey] = record;
-      
-      // Update Firebase immediately with proper types
-      try {
-        await setDoc(doc(db, "attendance", cacheKey), prepareFirestoreRecord(record));
-        console.log("Attendance record updated in Firebase");
-      } catch (err) {
-        console.error("Firebase update failed:", err);
-      }
+
+    // Always use handleSpecificAction when an action is provided
+    if (requestedAction) {
+      return await handleSpecificAction(record, requestedAction, formattedTime, currentHour)
     }
-    
-    return {
-      success,
-      action,
-      time: success ? formattedTime : undefined,
-      message,
-      userName
-    };
-    
+
+    // This is a fallback that should rarely be used - only if no action is specified
+    console.warn('No specific action provided - falling back to auto-determination. This should be avoided.')
+    return await handleAutoAction(record, formattedTime, currentHour)
   } catch (error) {
-    console.error("Error determining action:", error);
+    console.error("Error determining action:", error)
     return {
       success: false,
-      message: "System error. Please try again or contact administrator."
-    };
+      message: "System error. Please try again or contact administrator.",
+      userName,
+    }
+  }
+}
+
+// Handle specific user-requested actions
+async function handleSpecificAction(
+  record: TimeRecord,
+  action: AttendanceAction,
+  formattedTime: string,
+  currentHour: number,
+): Promise<ScanResult> {
+  const userName = record.userName
+
+  switch (action) {
+    case "Time In AM":
+      // Block AM time-in after 12 PM
+      if (currentHour >= 12) {
+        return {
+          success: false,
+          message: `${userName}, you cannot time in for AM  at ${formattedTime}. Time-in AM has ended.`,
+          userName,
+        }
+      }
+      // Check if already timed in
+      if (record.timeInAM) {
+        return {
+          success: false,
+          message: `${userName}, you have already timed in for AM .`,
+          userName,
+        }
+      }
+      record.timeInAM = formattedTime
+      return await handleSuccess(record, action, `Welcome ${userName}! AM time-in recorded at ${formattedTime}`)
+
+    case "Time Out AM":
+      // Allow AM time-out even without time-in (for people who forgot to time in)
+      if (record.timeOutAM) {
+        return {
+          success: false,
+          message: `${userName}, you have already timed out for AM.`,
+          userName,
+        }
+      }
+      record.timeOutAM = formattedTime
+      return await handleSuccess(record, action, `${userName}, AM time-out recorded at ${formattedTime}`)
+
+    case "Time In PM":
+      // Block PM time-in before 12 PM
+      if (currentHour < 12) {
+        return {
+          success: false,
+          message: `${userName}, you cannot time in for PM  before 12:00 PM.`,
+          userName,
+        }
+      }
+      // Check if already timed in
+      if (record.timeInPM) {
+        return {
+          success: false,
+          message: `${userName}, you have already timed in for PM .`,
+          userName,
+        }
+      }
+      record.timeInPM = formattedTime
+      return await handleSuccess(record, action, `Welcome ${userName}! PM time-in recorded at ${formattedTime}`)
+
+    case "Time Out PM":
+      // Allow PM time-out even without time-in (for people who forgot to time in)
+      if (record.timeOutPM) {
+        return {
+          success: false,
+          message: `${userName}, you have already timed out for PM shift.`,
+          userName,
+        }
+      }
+      record.timeOutPM = formattedTime
+      return await handleSuccess(record, action, `Goodbye ${userName}! PM time-out recorded at ${formattedTime}`)
+
+    default:
+      return {
+        success: false,
+        message: `${userName}, invalid action requested.`,
+        userName,
+      }
+  }
+}
+
+// Auto-determine action (legacy behavior)
+async function handleAutoAction(record: TimeRecord, formattedTime: string, currentHour: number): Promise<ScanResult> {
+  const userName = record.userName
+
+  // If it's AM hours (before 12 PM)
+  if (currentHour < 12) {
+    // Priority 1: Time In AM (if not done yet)
+    if (!record.timeInAM) {
+      record.timeInAM = formattedTime
+      return await handleSuccess(record, "Time In AM", `Welcome ${userName}! AM time-in recorded at ${formattedTime}`)
+    }
+    // Priority 2: Time Out AM (if AM time-in exists but time-out doesn't)
+    else if (!record.timeOutAM) {
+      record.timeOutAM = formattedTime
+      return await handleSuccess(record, "Time Out AM", `${userName}, AM time-out recorded at ${formattedTime}`)
+    }
+    // AM is complete, inform user about PM
+    else {
+      return {
+        success: false,
+        message: `${userName}, AM shift is complete. You can time-in for PM shift anytime after 12:00 PM.`,
+        userName,
+      }
+    }
+  }
+
+  // If it's PM hours (12 PM or later)
+  else {
+    // Allow AM time-out even without time-in
+    if (!record.timeOutAM) {
+      record.timeOutAM = formattedTime
+      return await handleSuccess(record, "Time Out AM", `${userName}, AM time-out recorded at ${formattedTime}`)
+    }
+
+    // Priority 1: Time In PM (if not done yet)
+    if (!record.timeInPM) {
+      record.timeInPM = formattedTime
+      return await handleSuccess(record, "Time In PM", `Welcome ${userName}! PM time-in recorded at ${formattedTime}`)
+    }
+
+    // Priority 2: Time Out PM (if PM time-in exists but time-out doesn't)
+    else if (!record.timeOutPM) {
+      record.timeOutPM = formattedTime
+      return await handleSuccess(record, "Time Out PM", `Goodbye ${userName}! PM time-out recorded at ${formattedTime}`)
+    }
+
+    // All PM actions completed
+    else {
+      return {
+        success: false,
+        message: `${userName}, you have completed all time entries for today.`,
+        userName,
+      }
+    }
+  }
+}
+
+async function handleSuccess(record: TimeRecord, action: AttendanceAction, message: string): Promise<ScanResult> {
+  try {
+    // Save to Firestore
+    await setDoc(doc(db, "attendance", `${record.userId}_${record.date}`), prepareFirestoreRecord(record))
+
+    // Update cache
+    CACHE.records[`${record.userId}_${record.date}`] = record
+
+    return {
+      success: true,
+      action,
+      time: format(new Date(), "hh:mm a"),
+      message,
+      userName: record.userName,
+    }
+  } catch (error) {
+    console.error("Error saving record:", error)
+    return {
+      success: false,
+      message: "Failed to save attendance record. Please try again.",
+      userName: record.userName,
+    }
+  }
+}
+
+// Additional utility functions
+export async function getAttendanceRecords(userId: string, startDate: string, endDate: string): Promise<TimeRecord[]> {
+  try {
+    const records: TimeRecord[] = []
+    const snapshot = await getDocs(collection(db, "attendance"))
+
+    snapshot.forEach((doc) => {
+      const data = doc.data()
+      if (data.userId === userId) {
+        const recordDate = data.date.toDate()
+        const dateStr = format(recordDate, "yyyy-MM-dd")
+
+        if (dateStr >= startDate && dateStr <= endDate) {
+          records.push({
+            userId: data.userId,
+            userName: data.userName,
+            date: dateStr,
+            timeInAM: data.timeInAM ? format(data.timeInAM.toDate(), "hh:mm a") : undefined,
+            timeOutAM: data.timeOutAM ? format(data.timeOutAM.toDate(), "hh:mm a") : undefined,
+            timeInPM: data.timeInPM ? format(data.timeInPM.toDate(), "hh:mm a") : undefined,
+            timeOutPM: data.timeOutPM ? format(data.timeOutPM.toDate(), "hh:mm a") : undefined,
+            missedAM: data.missedAM || false,
+            missedPM: data.missedPM || false,
+          })
+        }
+      }
+    })
+
+    return records.sort((a, b) => a.date.localeCompare(b.date))
+  } catch (error) {
+    console.error("Error fetching attendance records:", error)
+    return []
+  }
+}
+
+export async function deleteAttendanceRecord(userId: string, date: string): Promise<boolean> {
+  try {
+    await deleteDoc(doc(db, "attendance", `${userId}_${date}`))
+    delete CACHE.records[`${userId}_${date}`]
+    return true
+  } catch (error) {
+    console.error("Error deleting attendance record:", error)
+    return false
+  }
+}
+
+export function getAttendanceStatus(record: TimeRecord): {
+  amComplete: boolean
+  pmComplete: boolean
+  dayComplete: boolean
+  nextAction: string
+} {
+  const amComplete = !!(record.timeInAM && record.timeOutAM)
+  const pmComplete = !!(record.timeInPM && record.timeOutPM)
+
+  // Day is complete if either AM+PM are both complete OR just PM is complete (for PM-only workers)
+  const dayComplete = (amComplete && pmComplete) || (pmComplete && !record.timeInAM)
+
+  let nextAction = "Time In AM"
+  const currentHour = new Date().getHours()
+
+  // Determine next action based on current time and record state
+  if (currentHour < 12) {
+    // AM hours
+    if (!record.timeInAM) {
+      nextAction = "Time In AM"
+    } else if (!record.timeOutAM) {
+      nextAction = "Time Out AM"
+    } else {
+      nextAction = "Wait for PM (after 12:00 PM)"
+    }
+  } else {
+    // PM hours
+    if (record.timeInAM && !record.timeOutAM) {
+      nextAction = "Time Out AM"
+    } else if (!record.timeInPM) {
+      nextAction = "Time In PM"
+    } else if (!record.timeOutPM) {
+      nextAction = "Time Out PM"
+    } else {
+      nextAction = "Day Complete"
+    }
+  }
+
+  return {
+    amComplete,
+    pmComplete,
+    dayComplete,
+    nextAction,
   }
 }

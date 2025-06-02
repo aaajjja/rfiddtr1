@@ -1,21 +1,29 @@
-import React, { useState, useCallback } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import React, { useState, useCallback, useRef } from 'react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import Clock from './Clock';
 import RFIDInput from './RFIDInput';
 import StatusDisplay from './StatusDisplay';
 import Instructions from './Instructions';
-import { ScanResult } from '../types';
+import { ScanResult, AttendanceAction } from '../types';
 import { recordAttendance } from '../services/attendanceService';
 import { useToast } from "@/components/ui/use-toast";
 import { Button } from "@/components/ui/button";
-import { Settings } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Clock as ClockIcon, SunMedium, Moon, CheckCircle2, AlertCircle } from "lucide-react";
+import type { ReactNode } from "react";
 
 const DTRScanner: React.FC = () => {
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [selectedAction, setSelectedAction] = useState<AttendanceAction>('Time In AM');
   const { toast } = useToast();
+  const rfidInputRef = useRef<{ focus: () => void }>(null);
+  
+  const handleActionSelect = (action: AttendanceAction) => {
+    setSelectedAction(action);
+    // Focus the RFID input field after selecting an action
+    rfidInputRef.current?.focus();
+  };
   
   const handleScan = useCallback(async (cardUID: string) => {
     if (isProcessing) {
@@ -27,14 +35,23 @@ const DTRScanner: React.FC = () => {
     
     try {
       console.time('scan-processing');
-      const result = await recordAttendance(cardUID);
+      const result = await recordAttendance(cardUID, selectedAction);
       console.timeEnd('scan-processing');
       
       setScanResult(result);
       
       toast({
         title: result.success ? "Scan Successful" : "Scan Failed",
-        description: result.message,
+        description: (
+          <div className="flex flex-col items-center gap-4">
+            {result.success ? (
+              <CheckCircle2 className="h-8 w-8 text-emerald-500" />
+            ) : (
+              <AlertCircle className="h-8 w-8 text-red-500" />
+            )}
+            <span className="text-base">{result.message}</span>
+          </div>
+        ),
         variant: result.success ? "default" : "destructive",
       });
       
@@ -47,87 +64,132 @@ const DTRScanner: React.FC = () => {
       
       toast({
         title: "System Error",
-        description: "Failed to process scan. Please try again.",
+        description: (
+          <div className="flex flex-col items-center gap-4">
+            <AlertCircle className="h-8 w-8 text-red-500" />
+            <span className="text-base">Failed to process scan. Please try again.</span>
+          </div>
+        ),
         variant: "destructive",
       });
     } finally {
       setIsProcessing(false);
     }
-  }, [isProcessing, toast]);
+  }, [isProcessing, toast, selectedAction]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-emerald-50 to-slate-50 px-2 py-2 sm:py-4">
-      <div className="max-w-7xl mx-auto">
-        {/* Header Section - Horizontal layout for landscape */}
-        <div className="flex flex-col sm:flex-row items-center justify-between mb-2 sm:mb-4">
-          <div className="flex items-center gap-3 sm:gap-4">
-            <div className="flex-shrink-0 w-10 h-10 sm:w-12 sm:h-12 bg-blue-600 rounded-full flex items-center justify-center">
-              <svg className="w-5 h-5 sm:w-6 sm:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+    <div className="min-h-screen bg-[#f8fafb] px-4 py-6 sm:py-8">
+      <div className="max-w-6xl mx-auto">
+        {/* Header Section */}
+        <div className="bg-white rounded-2xl p-6 mb-8 shadow-sm border border-slate-100">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
+            <div className="flex items-center gap-5">
+              <div className="flex-shrink-0 w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-teal-600 to-emerald-600 rounded-2xl flex items-center justify-center shadow-md">
+                <ClockIcon className="w-7 h-7 sm:w-8 sm:h-8 text-white" />
+              </div>
+              <div className="text-center sm:text-left">
+                <h1 className="text-2xl sm:text-3xl font-semibold text-slate-800">
+                  MMSU Attendance System
+                </h1>
+                <p className="text-base text-slate-500 mt-1">Daily Time Record</p>
+              </div>
             </div>
-            <div className="text-center sm:text-left">
-              <h1 className="text-xl sm:text-2xl font-bold text-slate-800">MMSU Attendance System</h1>
-              <p className="text-sm sm:text-base text-slate-600">Daily Time Record</p>
-            </div>
+            <Clock className="text-slate-700 text-xl sm:text-2xl font-medium" />
           </div>
-          <Clock className="mt-2 sm:mt-0" />
         </div>
 
-        {/* Main Content - Two-column layout for landscape */}
-        <div className="grid sm:grid-cols-2 gap-2 sm:gap-4">
-          {/* Left Column - Scanner and Status */}
-          <div className="space-y-2 sm:space-y-4">
-            <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm">
-              <CardContent className="p-3 sm:p-4 space-y-4">
-                <StatusDisplay scanResult={scanResult} isProcessing={isProcessing} />
-                <Separator className="my-2 sm:my-3" />
-                <RFIDInput onScan={handleScan} isProcessing={isProcessing} />
-              </CardContent>
-            </Card>
+        {/* Main Content */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Left Column - Time In/Out Selection */}
+          <Card className="bg-white shadow-sm border-slate-100">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-xl text-slate-800 font-semibold">Time Entry</CardTitle>
+              <CardDescription className="text-slate-500">Select your time entry action below</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-8">
+                {/* Morning Section */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 mb-4">
+                    <SunMedium className="w-5 h-5 text-amber-500" />
+                    <h3 className="text-sm font-medium text-slate-600">Morning Session</h3>
+                  </div>
+                  <Button
+                    variant={selectedAction === 'Time In AM' ? "default" : "outline"}
+                    onClick={() => handleActionSelect('Time In AM')}
+                    className={`w-full h-12 text-base transition-all duration-200 ${
+                      selectedAction === 'Time In AM'
+                        ? 'bg-teal-600 hover:bg-teal-700 text-white shadow-sm'
+                        : 'text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-800'
+                    }`}
+                  >
+                    Time In AM
+                  </Button>
+                  <Button
+                    variant={selectedAction === 'Time Out AM' ? "default" : "outline"}
+                    onClick={() => handleActionSelect('Time Out AM')}
+                    className={`w-full h-12 text-base transition-all duration-200 ${
+                      selectedAction === 'Time Out AM'
+                        ? 'bg-teal-600 hover:bg-teal-700 text-white shadow-sm'
+                        : 'text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-800'
+                    }`}
+                  >
+                    Time Out AM
+                  </Button>
+                </div>
 
-            {/* Quick Info Cards */}
-            <div className="grid grid-cols-3 gap-2">
-              <Card className="border-0 shadow-lg bg-blue-600 text-white">
-                <CardContent className="p-2 sm:p-3 text-center">
-                  <div className="text-sm sm:text-base font-bold mb-0.5 sm:mb-1">Time In</div>
-                  <div className="text-xs text-blue-100">Morning: 8:00 AM</div>
-                  <div className="text-xs text-blue-100">Afternoon: 1:00 PM</div>
-                </CardContent>
-              </Card>
-              
-              <Card className="border-0 shadow-lg bg-emerald-600 text-white">
-                <CardContent className="p-2 sm:p-3 text-center">
-                  <div className="text-sm sm:text-base font-bold mb-0.5 sm:mb-1">Time Out</div>
-                  <div className="text-xs text-emerald-100">Morning: 12:00 PM</div>
-                  <div className="text-xs text-emerald-100">Afternoon: 5:00 PM</div>
-                </CardContent>
-              </Card>
+                {/* Afternoon Section */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Moon className="w-5 h-5 text-indigo-500" />
+                    <h3 className="text-sm font-medium text-slate-600">Afternoon Session</h3>
+                  </div>
+                  <Button
+                    variant={selectedAction === 'Time In PM' ? "default" : "outline"}
+                    onClick={() => handleActionSelect('Time In PM')}
+                    className={`w-full h-12 text-base transition-all duration-200 ${
+                      selectedAction === 'Time In PM'
+                        ? 'bg-teal-600 hover:bg-teal-700 text-white shadow-sm'
+                        : 'text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-800'
+                    }`}
+                  >
+                    Time In PM
+                  </Button>
+                  <Button
+                    variant={selectedAction === 'Time Out PM' ? "default" : "outline"}
+                    onClick={() => handleActionSelect('Time Out PM')}
+                    className={`w-full h-12 text-base transition-all duration-200 ${
+                      selectedAction === 'Time Out PM'
+                        ? 'bg-teal-600 hover:bg-teal-700 text-white shadow-sm'
+                        : 'text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-800'
+                    }`}
+                  >
+                    Time Out PM
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-              <Card className="border-0 shadow-lg bg-slate-600 text-white">
-                <CardContent className="p-2 sm:p-3 text-center">
-                  <div className="text-sm sm:text-base font-bold mb-0.5 sm:mb-1">Support</div>
-                  <div className="text-xs text-slate-100">Need help?</div>
-                  <div className="text-xs text-slate-100">IT Support</div>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-
-          {/* Right Column - Instructions */}
-          <div className="h-full relative">
-            <Instructions />
-            <Link to="/admin" className="absolute bottom-2 right-2">
-              <Button variant="outline" size="sm" className="bg-white/90 backdrop-blur-sm shadow-lg">
-                <Settings className="w-4 h-4 mr-1" />
-                Admin Panel
-              </Button>
-            </Link>
-          </div>
+          {/* Right Column - Scanner and Status */}
+          <Card className="bg-white shadow-sm border-slate-100">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-xl text-slate-800 font-semibold">RFID Scanner</CardTitle>
+              <CardDescription className="text-slate-500">
+                {selectedAction} - Please scan your ID card
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <RFIDInput ref={rfidInputRef} onScan={handleScan} isProcessing={isProcessing} />
+              <StatusDisplay result={scanResult} />
+              <Separator className="my-6 bg-slate-100" />
+              <Instructions />
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
   );
-};
+}
 
 export default DTRScanner;

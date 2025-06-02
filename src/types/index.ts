@@ -1,4 +1,3 @@
-
 export interface User {
   id: string;
   name: string;
@@ -8,21 +7,20 @@ export interface User {
 }
 
 export interface TimeRecord {
+  id?: string;
   userId: string;
   userName: string;
   date: string;
+  originalDate: Date;
   timeInAM?: string;
   timeOutAM?: string;
   timeInPM?: string;
   timeOutPM?: string;
 }
 
-export type AttendanceAction = 'Time In AM' | 'Time Out AM' | 'Time In PM' | 'Time Out PM' | 'Complete' | 'Time In AM (Updated)';
+export type AttendanceAction = 'Time In AM' | 'Time Out AM' | 'Time In PM' | 'Time Out PM';
 
 export interface ScanResult {
   success: boolean;
-  action?: AttendanceAction;
-  time?: string;
   message: string;
-  userName?: string;
 }

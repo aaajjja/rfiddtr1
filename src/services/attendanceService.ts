@@ -1,9 +1,9 @@
-import type { User, ScanResult } from "../types";
+import type { User, ScanResult, AttendanceAction } from "../types";
 import { getUserByCardUID, registerNewUser } from "./userService";
 import { determineAction } from "./timeRecordService";
 import { getAttendanceRecords, clearAttendanceRecords} from "./attendanceManagementService";
 
-export async function recordAttendance(cardUID: string): Promise<ScanResult> {
+export async function recordAttendance(cardUID: string, action: AttendanceAction): Promise<ScanResult> {
   try {
     // Get user by card UID
     const user = await getUserByCardUID(cardUID);
@@ -16,7 +16,7 @@ export async function recordAttendance(cardUID: string): Promise<ScanResult> {
     }
     
     // Determine and execute appropriate action
-    const result = await determineAction(user.id, user.name);
+    const result = await determineAction(user.id, user.name, action);
     return result;
     
   } catch (error) {

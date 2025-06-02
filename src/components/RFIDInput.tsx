@@ -1,85 +1,104 @@
-
-import React, { useState, useRef, useEffect } from 'react';
-import { Card, CardContent } from "@/components/ui/card";
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Scan } from "lucide-react";
+import { Loader2, CreditCard } from "lucide-react";
 
 interface RFIDInputProps {
   onScan: (cardUID: string) => void;
   isProcessing: boolean;
 }
 
-const RFIDInput: React.FC<RFIDInputProps> = ({ onScan, isProcessing }) => {
-  const [cardUID, setCardUID] = useState<string>('');
-  const [isFocused, setIsFocused] = useState<boolean>(false);
+const RFIDInput = forwardRef<{ focus: () => void }, RFIDInputProps>(({ onScan, isProcessing }, ref) => {
+  const [input, setInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Auto focus the hidden input when component mounts
+  useImperativeHandle(ref, () => ({
+    focus: () => {
+      inputRef.current?.focus();
+    }
+  }));
+
   useEffect(() => {
-    const focusInterval = setInterval(() => {
-      if (inputRef.current && !isProcessing) {
-        inputRef.current.focus();
-      }
-    }, 500);
-    
-    return () => clearInterval(focusInterval);
+    // Focus input on mount and after each scan
+    inputRef.current?.focus();
   }, [isProcessing]);
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && cardUID.length > 0) {
-      onScan(cardUID);
-      setCardUID('');
+  const processInput = (value: string) => {
+    // Clean the input: remove whitespace, newlines, carriage returns
+    const cleanValue = value.trim().replace(/[\r\n]/g, '');
+    
+    // Convert to uppercase for consistency (if your UIDs are hex)
+    const normalizedValue = cleanValue.toUpperCase();
+    
+    // Only process if we have a meaningful value
+    if (normalizedValue.length >= 4) { // Adjust minimum length as needed
+      console.log('Processing RFID input:', normalizedValue); // Debug log
+      onScan(normalizedValue);
+      setInput('');
     }
   };
 
-  const handleScanButtonClick = () => {
-    // Example cards for demo: 12345678, 87654321, 11223344
-    if (cardUID.length > 0) {
-      onScan(cardUID);
-      setCardUID('');
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setInput(value);
+
+    // Clear any existing timeout
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
     }
-    inputRef.current?.focus();
+
+    // For RFID readers, set a short timeout to handle rapid input
+    timeoutRef.current = setTimeout(() => {
+      if (value.length >= 4) { // Minimum reasonable UID length
+        processInput(value);
+      }
+    }, 100); // 100ms timeout to allow for complete input
   };
 
-  // For simulation purposes, we're showing an input field
-  // In a real system, this would be hidden and automatically populated by the RFID reader
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Handle Enter key press (common with RFID readers)
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      processInput(input);
+    }
+  };
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
   return (
-    <Card className="border border-primary/20">
-      <CardContent className="pt-6">
-        <div className="text-center mb-4">
-          <h3 className="text-lg font-medium">Scan RFID Card</h3>
-          <p className="text-sm text-muted-foreground">
-            For demo purposes, use these sample card UIDs: <br />
-            <span className="font-mono">12345678, 87654321, 11223344</span>
-          </p>
+    <div className="relative">
+      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+        <CreditCard className="h-5 w-5" />
+      </div>
+      <Input
+        ref={inputRef}
+        type="text"
+        value={input}
+        onChange={handleInputChange}
+        onKeyDown={handleKeyDown}
+        disabled={isProcessing}
+        className="h-12 pl-11 pr-10 bg-white border-slate-200 text-slate-800 text-base placeholder:text-slate-400 focus:border-teal-500 focus:ring-teal-500"
+        placeholder="Scan your RFID card..."
+        autoComplete="off"
+        spellCheck={false}
+      />
+      {isProcessing && (
+        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+          <Loader2 className="h-5 w-5 animate-spin text-teal-600" />
         </div>
-        
-        <div className="flex space-x-2">
-          <Input
-            ref={inputRef}
-            type="text"
-            value={cardUID}
-            onChange={(e) => setCardUID(e.target.value)}
-            onKeyDown={handleKeyPress}
-            onFocus={() => setIsFocused(true)}
-            onBlur={() => setIsFocused(false)}
-            placeholder="Enter Card UID"
-            className={`border-2 ${isFocused ? 'border-primary' : 'border-muted'}`}
-            disabled={isProcessing}
-          />
-          <Button
-            onClick={handleScanButtonClick}
-            disabled={isProcessing || !cardUID}
-            className="flex-shrink-0"
-          >
-            <Scan className="mr-2 h-4 w-4" />
-            Scan
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+      )}
+    </div>
   );
-};
+});
 
 export default RFIDInput;

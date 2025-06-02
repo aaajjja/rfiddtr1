@@ -19,8 +19,6 @@ export function loadSimulatedUsers() {
   });
 }
 
-
-
 // Function to clear all simulated users from the cache
 export function clearSimulatedUsers(): boolean {
   // Get list of simulated user cardUIDs
@@ -145,6 +143,83 @@ export async function registerNewUser(userData: {
     return {
       success: false,
       message: "Failed to register user due to system error."
+    };
+  }
+}
+
+// Function to delete a user
+export async function deleteUser(userId: string): Promise<{ success: boolean; message: string }> {
+  try {
+    // Get the user document from Firebase
+    const userRef = doc(db, "users", userId);
+    const userDoc = await getDoc(userRef);
+
+    if (!userDoc.exists()) {
+      return {
+        success: false,
+        message: "User not found."
+      };
+    }
+
+    const userData = userDoc.data() as User;
+
+    // Delete from Firebase
+    await deleteDoc(userRef);
+
+    // Remove from cache
+    delete CACHE.users[userData.cardUID];
+
+    return {
+      success: true,
+      message: `User ${userData.name} deleted successfully.`
+    };
+  } catch (error) {
+    console.error("Error deleting user:", error);
+    return {
+      success: false,
+      message: "Failed to delete user due to system error."
+    };
+  }
+}
+
+// Function to edit a user
+export async function editUser(userId: string, updates: Partial<User>): Promise<{ success: boolean; message: string }> {
+  try {
+    // Get the user document from Firebase
+    const userRef = doc(db, "users", userId);
+    const userDoc = await getDoc(userRef);
+
+    if (!userDoc.exists()) {
+      return {
+        success: false,
+        message: "User not found."
+      };
+    }
+
+    const currentUser = userDoc.data() as User;
+
+    // Create updated user data
+    const updatedUser = {
+      ...currentUser,
+      ...updates,
+      id: currentUser.id // Ensure ID doesn't change
+    };
+
+    // Update in Firebase
+    await setDoc(userRef, updatedUser);
+
+    // Update cache
+    CACHE.users[updatedUser.cardUID] = updatedUser;
+
+    return {
+      success: true,
+      message: `User ${updatedUser.name} updated successfully.`
+    };
+  } catch (error) {
+    console.error("Error updating user:", error);
+    return {
+      success: false,
+      message: "Failed to update user due to system error."
     };
   }
 }
