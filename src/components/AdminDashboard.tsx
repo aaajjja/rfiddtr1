@@ -489,27 +489,54 @@ const AdminDashboard: React.FC = () => {
 
     try {
       setIsExporting(true)
-      const csvContent = await exportAttendanceData(selectedMonth)
-      
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
-      const link = document.createElement("a")
-      const url = URL.createObjectURL(blob)
-      
-      link.setAttribute("href", url)
-      link.setAttribute("download", `attendance_${selectedMonth}.csv`)
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      
-      toast({
-        title: "Export Successful",
-        description: `Attendance data for ${getAvailableMonths().find(m => m.value === selectedMonth)?.label} has been downloaded`,
-      })
+
+      console.log("Starting export for month:", selectedMonth)
+
+      const result = await exportAttendanceData(selectedMonth, "pdf")
+
+      if (result instanceof Blob) {
+        // Handle PDF
+        const url = URL.createObjectURL(result)
+        const link = document.createElement("a")
+        link.href = url
+        link.download = `attendance_${selectedMonth}.pdf`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        URL.revokeObjectURL(url)
+
+        toast({
+          title: "Export Successful",
+          description: `Attendance data for ${getAvailableMonths().find((m) => m.value === selectedMonth)?.label} has been downloaded`,
+        })
+      } else {
+        // Handle CSV (fallback)
+        const blob = new Blob([result], { type: "text/csv;charset=utf-8;" })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement("a")
+        link.href = url
+        link.download = `attendance_${selectedMonth}.csv`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        URL.revokeObjectURL(url)
+
+        toast({
+          title: "Export Successful",
+          description: `Attendance data for ${getAvailableMonths().find((m) => m.value === selectedMonth)?.label} has been downloaded as CSV`,
+        })
+      }
     } catch (error) {
       console.error("Error exporting data:", error)
+
+      let errorMessage = "Failed to export attendance data. Please try again."
+      if (error instanceof Error) {
+        errorMessage = error.message
+      }
+
       toast({
         title: "Export Failed",
-        description: "Failed to export attendance data. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {
@@ -809,11 +836,7 @@ const AdminDashboard: React.FC = () => {
                       disabled={isExporting || isProcessing || selectedMonth === "all"}
                       className="h-10 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-800 border-slate-200 shadow-sm"
                     >
-                      {isExporting ? (
-                        <Loader2 className="h-5 w-5 animate-spin" />
-                      ) : (
-                        <Download className="h-5 w-5" />
-                      )}
+                      {isExporting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />}
                       <span className="ml-2 hidden sm:inline">Download</span>
                     </Button>
                     <Button

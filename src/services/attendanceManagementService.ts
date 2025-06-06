@@ -3,6 +3,8 @@ import { collection, getDocs, doc, setDoc, deleteDoc, Timestamp } from "firebase
 import { db } from "./firebase"
 import type { TimeRecord } from "../types/index"
 import { CACHE } from "./cacheUtils"
+import { jsPDF } from "jspdf"
+import autoTable from "jspdf-autotable"
 
 export async function getAttendanceRecords(): Promise<TimeRecord[]> {
   try {
@@ -144,14 +146,22 @@ export async function reprocessAttendanceData(): Promise<{ processedCount: numbe
         userId: user.id,
         userName: user.name,
         date: Timestamp.fromDate(today), // Store as Firestore Timestamp
-        timeInAM: Timestamp.fromDate(new Date().setHours(randomHour(7, 9), randomHour(0, 59))),
-        timeOutAM: Timestamp.fromDate(new Date().setHours(randomHour(11, 12), randomHour(0, 59))),
-        timeInPM: Timestamp.fromDate(new Date().setHours(randomHour(13, 14), randomHour(0, 59))),
+        timeInAM: Timestamp.fromDate(
+          new Date(today.getFullYear(), today.getMonth(), today.getDate(), randomHour(7, 9), randomHour(0, 59)),
+        ),
+        timeOutAM: Timestamp.fromDate(
+          new Date(today.getFullYear(), today.getMonth(), today.getDate(), randomHour(11, 12), randomHour(0, 59)),
+        ),
+        timeInPM: Timestamp.fromDate(
+          new Date(today.getFullYear(), today.getMonth(), today.getDate(), randomHour(13, 14), randomHour(0, 59)),
+        ),
       }
 
       // Some users have already left for the day
       if (Math.random() > 0.3) {
-        record.timeOutPM = Timestamp.fromDate(new Date().setHours(randomHour(16, 18), randomHour(0, 59)))
+        record.timeOutPM = Timestamp.fromDate(
+          new Date(today.getFullYear(), today.getMonth(), today.getDate(), randomHour(16, 18), randomHour(0, 59)),
+        )
       }
 
       // Save to Firebase
@@ -166,7 +176,75 @@ export async function reprocessAttendanceData(): Promise<{ processedCount: numbe
   }
 }
 
-export async function exportAttendanceData(month: string): Promise<string> {
+export async function generatePDF(records: TimeRecord[], month: string): Promise<Blob> {
+  try {
+    const doc = new jsPDF()
+
+    // Determine month label
+    const monthLabel =
+      records.length > 0 && records[0].originalDate ? format(records[0].originalDate, "MMMM yyyy") : month
+
+    // Add title
+    doc.setFontSize(16)
+    doc.text("MMSU Attendance Records", 14, 15)
+    doc.setFontSize(12)
+    doc.text(monthLabel, 14, 25)
+
+    // Prepare table data with better error handling
+    const tableData = records.map((record) => {
+      try {
+        const date = record.originalDate || new Date(record.date)
+        return [
+          format(date, "MM/dd/yyyy"),
+          record.userName || "Unknown",
+          record.timeInAM || "-",
+          record.timeOutAM || "-",
+          record.timeInPM || "-",
+          record.timeOutPM || "-",
+        ]
+      } catch (error) {
+        console.warn("Error formatting record for PDF:", record, error)
+        return [
+          record.date || "Invalid Date",
+          record.userName || "Unknown",
+          record.timeInAM || "-",
+          record.timeOutAM || "-",
+          record.timeInPM || "-",
+          record.timeOutPM || "-",
+        ]
+      }
+    })
+
+    // Add table using autoTable
+    autoTable(doc, {
+      head: [["Date", "Name", "Time In AM", "Time Out AM", "Time In PM", "Time Out PM"]],
+      body: tableData,
+      startY: 35,
+      styles: {
+        fontSize: 9,
+        cellPadding: 3,
+      },
+      headStyles: {
+        fillColor: [51, 153, 153],
+        textColor: 255,
+        fontSize: 10,
+        fontStyle: "bold",
+      },
+      alternateRowStyles: {
+        fillColor: [245, 245, 245],
+      },
+    })
+
+    // Return as blob
+    const pdfBlob = doc.output("blob")
+    return pdfBlob
+  } catch (error) {
+    console.error("Error generating PDF:", error)
+    throw new Error(`Failed to generate PDF: ${error.message}`)
+  }
+}
+
+export async function exportAttendanceData(month: string, exportFormat: "pdf" | "csv" = "pdf"): Promise<string | Blob> {
   try {
     console.log(`Exporting attendance data for month: ${month}`)
 
@@ -176,12 +254,14 @@ export async function exportAttendanceData(month: string): Promise<string> {
 
     // Filter records for the specified month
     const filteredRecords = records.filter((record) => {
-      if (!record.originalDate) {
-        console.warn("Record missing originalDate:", record)
+      if (!record.originalDate && !record.date) {
+        console.warn("Record missing date:", record)
         return false
       }
+
       try {
-        const recordMonth = format(record.originalDate, "yyyy-MM")
+        const dateToCheck = record.originalDate || new Date(record.date)
+        const recordMonth = format(dateToCheck, "yyyy-MM")
         return recordMonth === month
       } catch (error) {
         console.warn("Error formatting date for record:", record, error)
@@ -191,46 +271,57 @@ export async function exportAttendanceData(month: string): Promise<string> {
 
     console.log(`Filtered records for ${month}: ${filteredRecords.length}`)
 
-    // If no records found, return empty CSV with headers
     if (filteredRecords.length === 0) {
-      const headers = ["Date", "Name", "Time In (AM)", "Time Out (AM)", "Time In (PM)", "Time Out (PM)"]
-      return headers.join(",") + "\n"
+      throw new Error(`No attendance records found for ${month}`)
     }
 
     // Sort records by date and user name
     filteredRecords.sort((a, b) => {
-      if (!a.originalDate || !b.originalDate) return 0
-      const dateCompare = a.originalDate.getTime() - b.originalDate.getTime()
-      if (dateCompare !== 0) return dateCompare
-      return (a.userName || "").localeCompare(b.userName || "")
+      try {
+        const dateA = a.originalDate || new Date(a.date)
+        const dateB = b.originalDate || new Date(b.date)
+        const dateCompare = dateA.getTime() - dateB.getTime()
+        if (dateCompare !== 0) return dateCompare
+        return (a.userName || "").localeCompare(b.userName || "")
+      } catch (error) {
+        console.warn("Error sorting records:", error)
+        return 0
+      }
     })
 
-    // Create CSV content with proper escaping
+    if (exportFormat === "pdf") {
+      return await generatePDF(filteredRecords, month)
+    }
+
+    // CSV format
     const headers = ["Date", "Name", "Time In (AM)", "Time Out (AM)", "Time In (PM)", "Time Out (PM)"]
+
     const csvRows = [
       headers.join(","),
       ...filteredRecords.map((record) => {
-        const formattedDate = format(record.originalDate!, "MM/dd/yyyy")
-        const values = [
-          formattedDate,
-          record.userName || "",
-          record.timeInAM || "",
-          record.timeOutAM || "",
-          record.timeInPM || "",
-          record.timeOutPM || "",
-        ].map((value) => {
-          // Escape quotes and wrap in quotes for proper CSV formatting
-          const escaped = (value || "").toString().replace(/"/g, '""')
-          return `"${escaped}"`
-        })
-        return values.join(",")
+        try {
+          const dateToFormat = record.originalDate || new Date(record.date)
+          const formattedDate = format(dateToFormat, "MM/dd/yyyy")
+          const values = [
+            formattedDate,
+            record.userName || "",
+            record.timeInAM || "",
+            record.timeOutAM || "",
+            record.timeInPM || "",
+            record.timeOutPM || "",
+          ].map((value) => {
+            const escaped = (value || "").toString().replace(/"/g, '""')
+            return `"${escaped}"`
+          })
+          return values.join(",")
+        } catch (error) {
+          console.warn("Error formatting record for CSV:", record, error)
+          return `"${record.date || "Invalid Date"}","${record.userName || ""}","","","",""`
+        }
       }),
     ]
 
-    const csvContent = csvRows.join("\n")
-    console.log(`Generated CSV with ${csvRows.length - 1} data rows`)
-
-    return csvContent
+    return csvRows.join("\n")
   } catch (error) {
     console.error("Error exporting attendance data:", error)
     throw error
